@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>週邊管理 (本地版)</title>
+    <title>グッズ管理 (ローカル版)</title>
     
-    <!-- 必要的庫：透過 CDN 加載，確保單檔案可運行 -->
+    <!-- 必要なライブラリ：CDN経由でロード -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,7 +13,7 @@
     
     <style>
         body { 
-            font-family: -apple-system, "Helvetica Neue", "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans TC", sans-serif; 
+            font-family: -apple-system, "Helvetica Neue", "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; 
             background-color: #F8F9FA; 
             margin: 0; 
             -webkit-tap-highlight-color: transparent; 
@@ -47,12 +47,12 @@
             acrylic: { jp: "アクスタ", zh: "壓克力" },
             badge: { jp: "缶バッジ", zh: "徽章" },
             apparel: { jp: "アパレル", zh: "服飾" },
-            goods: { jp: "雑貨", zh: "生活用品" },
+            goods: { jp: "生活雑貨", zh: "生活用品" },
             others: { jp: "その他", zh: "其他" }
         };
 
         function App() {
-            // 初始化：從本地儲存讀取資料
+            // 初期化：ローカルストレージからデータを読み込む
             const [products, setProducts] = useState(() => {
                 const saved = localStorage.getItem(STORAGE_KEY);
                 return saved ? JSON.parse(saved) : [];
@@ -65,13 +65,13 @@
             const [errorMessage, setErrorMessage] = useState('');
             const fileInputRef = useRef(null);
 
-            // 每當產品變動時，同步到 localStorage
+            // データが変更されたらローカルストレージに保存
             useEffect(() => {
                 try {
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
                 } catch (e) {
                     if (e.name === 'QuotaExceededError') {
-                        setErrorMessage("儲存空間已滿，請避免使用過大的圖片");
+                        setErrorMessage("ストレージがいっぱいです。画像のサイズを小さくしてください。");
                     }
                 }
             }, [products]);
@@ -80,7 +80,7 @@
                 const file = e.target.files[0];
                 if (file) {
                     if (file.size > 1.5 * 1024 * 1024) { 
-                        setErrorMessage("圖片太大 (建議小於 1.5MB)");
+                        setErrorMessage("画像が大きすぎます (1.5MB以下推奨)");
                         setTimeout(() => setErrorMessage(''), 3000);
                         return;
                     }
@@ -94,7 +94,7 @@
 
             const handleSave = () => {
                 if (!editingProduct.name.trim()) {
-                    setErrorMessage("請輸入商品名稱");
+                    setErrorMessage("商品名を入力してください");
                     setTimeout(() => setErrorMessage(''), 3000);
                     return;
                 }
@@ -121,19 +121,19 @@
 
             return (
                 <div className="max-w-md mx-auto min-h-screen pb-10 bg-[#F8F9FA] relative">
-                    {/* Error Toast */}
+                    {/* エラートースト */}
                     {errorMessage && (
                         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[100] bg-red-600 text-white px-6 py-3 rounded-full shadow-xl text-xs font-bold">
                             {errorMessage}
                         </div>
                     )}
 
-                    {/* Header */}
+                    {/* ヘッダー */}
                     <div className="p-6 pt-10">
                         <div className="flex justify-between items-center mb-6">
                             <div>
                                 <h1 className="text-3xl font-black text-slate-800 tracking-tight">G-Manager</h1>
-                                <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Local Collection</p>
+                                <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">My Collection</p>
                             </div>
                             <button 
                                 onClick={() => {
@@ -144,18 +144,18 @@
                             >+</button>
                         </div>
 
-                        {/* Search Bar */}
+                        {/* 検索バー */}
                         <div className="bg-white rounded-2xl flex items-center px-5 py-4 mb-6 shadow-sm border border-slate-100">
                             <span className="mr-3 opacity-30">🔍</span>
                             <input 
                                 className="bg-transparent border-none outline-none w-full text-sm font-medium" 
-                                placeholder="搜尋商品或作品..." 
+                                placeholder="商品名やシリーズで検索..." 
                                 value={searchQuery} 
                                 onChange={e => setSearchQuery(e.target.value)} 
                             />
                         </div>
 
-                        {/* Tabs */}
+                        {/* カテゴリタブ */}
                         <div className="flex overflow-x-auto hide-scrollbar gap-2 mb-8">
                             {Object.entries(categories).map(([key, label]) => (
                                 <button 
@@ -163,12 +163,12 @@
                                     onClick={() => setActiveTab(key)} 
                                     className={`px-5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${activeTab === key ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-200'}`}
                                 >
-                                    {label.jp} <span className="text-[9px] opacity-60 ml-0.5 font-normal">{label.zh}</span>
+                                    {label.jp}
                                 </button>
                             ))}
                         </div>
 
-                        {/* Grid List */}
+                        {/* 商品一覧 */}
                         <div className="grid grid-cols-2 gap-4">
                             {filteredProducts.map(p => (
                                 <div 
@@ -185,7 +185,7 @@
                                     </div>
                                     <div className="p-4">
                                         <p className="text-[9px] text-indigo-500 font-black truncate uppercase mb-1">{p.series || 'No Series'}</p>
-                                        <h3 className="font-bold text-sm text-slate-800 truncate">{p.name || '未命名'}</h3>
+                                        <h3 className="font-bold text-sm text-slate-800 truncate">{p.name || '未設定'}</h3>
                                     </div>
                                 </div>
                             ))}
@@ -193,20 +193,20 @@
 
                         {filteredProducts.length === 0 && (
                             <div className="text-center py-20 bg-white/50 rounded-3xl border border-dashed border-slate-200 mt-4">
-                                <p className="text-slate-400 text-xs font-bold">無搜尋結果</p>
+                                <p className="text-slate-400 text-xs font-bold">データが見つかりません</p>
                             </div>
                         )}
                     </div>
 
-                    {/* Editor Modal */}
+                    {/* 編集モーダル */}
                     {isModalOpen && editingProduct && (
                         <div className="fixed inset-0 z-50 flex items-end">
                             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
                             <div className="relative w-full max-w-md mx-auto bg-[#F2F2F7] rounded-t-[2.5rem] h-[90vh] flex flex-col modal-up overflow-hidden">
                                 <div className="flex justify-between items-center px-8 py-6 bg-white border-b border-slate-100">
-                                    <button onClick={() => setIsModalOpen(false)} className="text-slate-400 text-sm font-bold">關閉</button>
+                                    <button onClick={() => setIsModalOpen(false)} className="text-slate-400 text-sm font-bold">キャンセル</button>
                                     <h2 className="font-black text-slate-800 tracking-wider">DETAILS</h2>
-                                    <button onClick={handleSave} className="text-indigo-600 font-black text-sm">儲存</button>
+                                    <button onClick={handleSave} className="text-indigo-600 font-black text-sm">保存</button>
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto p-8 space-y-6">
@@ -219,8 +219,8 @@
                                                 <img src={editingProduct.image} className="w-full h-full object-cover" />
                                             ) : (
                                                 <div className="text-center">
-                                                    <span className="text-4xl block mb-2">🖼️</span>
-                                                    <span className="text-[10px] text-slate-300 font-bold uppercase">Add Photo</span>
+                                                    <span className="text-4xl block mb-2">📸</span>
+                                                    <span className="text-[10px] text-slate-300 font-bold uppercase">写真を追加</span>
                                                 </div>
                                             )}
                                         </div>
@@ -229,37 +229,40 @@
 
                                     <div className="space-y-4">
                                         <div className="bg-white p-4 rounded-2xl border border-slate-100">
-                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">商品名稱</label>
+                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">商品名</label>
                                             <input 
                                                 className="w-full bg-transparent outline-none font-bold text-slate-800" 
+                                                placeholder="例：アクリルスタンド"
                                                 value={editingProduct.name} 
                                                 onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} 
                                             />
                                         </div>
                                         <div className="bg-white p-4 rounded-2xl border border-slate-100">
-                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">作品系列</label>
+                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">シリーズ / 作品</label>
                                             <input 
                                                 className="w-full bg-transparent outline-none font-bold text-slate-700" 
+                                                placeholder="例：ホロライブ"
                                                 value={editingProduct.series} 
                                                 onChange={e => setEditingProduct({...editingProduct, series: e.target.value})} 
                                             />
                                         </div>
                                         <div className="bg-white p-4 rounded-2xl border border-slate-100">
-                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">分類</label>
+                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">カテゴリ</label>
                                             <select 
                                                 className="w-full bg-transparent outline-none font-black text-indigo-600 appearance-none" 
                                                 value={editingProduct.category} 
                                                 onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
                                             >
                                                 {Object.entries(categories).filter(([k]) => k !== 'all').map(([k, v]) => (
-                                                    <option key={k} value={k}>{v.zh}</option>
+                                                    <option key={k} value={k}>{v.jp}</option>
                                                 ))}
                                             </select>
                                         </div>
                                         <div className="bg-white p-4 rounded-2xl border border-slate-100">
-                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">備註</label>
+                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">メモ</label>
                                             <textarea 
                                                 className="w-full bg-transparent outline-none text-sm h-24 resize-none" 
+                                                placeholder="購入場所や価格など..."
                                                 value={editingProduct.memo} 
                                                 onChange={e => setEditingProduct({...editingProduct, memo: e.target.value})} 
                                             />
@@ -267,10 +270,10 @@
 
                                         {editingProduct.id && (
                                             <button 
-                                                onClick={() => { if(confirm("確定要刪除嗎？")) handleDelete(editingProduct.id); }} 
+                                                onClick={() => { if(confirm("この商品を削除してもよろしいですか？")) handleDelete(editingProduct.id); }} 
                                                 className="w-full py-4 text-red-500 font-black text-xs uppercase tracking-widest"
                                             >
-                                                DELETE ITEM
+                                                商品を削除する
                                             </button>
                                         )}
                                     </div>
