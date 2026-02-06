@@ -1,341 +1,289 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>週邊管理 (本地版)</title>
+    
+    <!-- 必要的庫：透過 CDN 加載，確保單檔案可運行 -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        body { 
+            font-family: -apple-system, "Helvetica Neue", "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans TC", sans-serif; 
+            background-color: #F8F9FA; 
+            margin: 0; 
+            -webkit-tap-highlight-color: transparent; 
+        }
+        .ios-blur { 
+            backdrop-filter: blur(20px); 
+            -webkit-backdrop-filter: blur(20px); 
+        }
+        .hide-scrollbar::-webkit-scrollbar { 
+            display: none; 
+        }
+        .modal-up { 
+            animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+        }
+        @keyframes slideUp { 
+            from { transform: translateY(100%); } 
+            to { transform: translateY(0); } 
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
-// --- Firebase 初始化 (規則 1 & 3) ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'merch-manager-v2';
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
 
-const categories = {
-    all: { jp: "すべて", zh: "全部" },
-    acrylic: { jp: "アクスタ", zh: "壓克力" },
-    badge: { jp: "缶バッジ", zh: "徽章" },
-    apparel: { jp: "アパレル", zh: "服飾" },
-    goods: { jp: "雑貨", zh: "生活用品" },
-    others: { jp: "その他", zh: "其他" }
-};
+        const STORAGE_KEY = 'local_merch_manager_v1';
 
-export default function App() {
-    const [user, setUser] = useState(null);
-    const [products, setProducts] = useState([]);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [activeTab, setActiveTab] = useState('all');
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [editingProduct, setEditingProduct] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [errorMessage, setErrorMessage] = useState('');
-    const fileInputRef = useRef(null);
+        const categories = {
+            all: { jp: "すべて", zh: "全部" },
+            acrylic: { jp: "アクスタ", zh: "壓克力" },
+            badge: { jp: "缶バッジ", zh: "徽章" },
+            apparel: { jp: "アパレル", zh: "服飾" },
+            goods: { jp: "雑貨", zh: "生活用品" },
+            others: { jp: "その他", zh: "其他" }
+        };
 
-    // 1. 認證設置 (規則 3)
-    useEffect(() => {
-        const initAuth = async () => {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
+        function App() {
+            // 初始化：從本地儲存讀取資料
+            const [products, setProducts] = useState(() => {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                return saved ? JSON.parse(saved) : [];
+            });
+
+            const [searchQuery, setSearchQuery] = useState('');
+            const [activeTab, setActiveTab] = useState('all');
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [editingProduct, setEditingProduct] = useState(null);
+            const [errorMessage, setErrorMessage] = useState('');
+            const fileInputRef = useRef(null);
+
+            // 每當產品變動時，同步到 localStorage
+            useEffect(() => {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
+                } catch (e) {
+                    if (e.name === 'QuotaExceededError') {
+                        setErrorMessage("儲存空間已滿，請避免使用過大的圖片");
+                    }
                 }
-            } catch (e) {
-                console.error("Auth error", e);
-            }
-        };
-        initAuth();
-        const unsubscribe = onAuthStateChanged(auth, (u) => {
-            setUser(u);
-            if (u) setIsLoading(false);
-        });
-        return () => unsubscribe();
-    }, []);
+            }, [products]);
 
-    // 2. 即時資料庫同步 (規則 1 & 2)
-    useEffect(() => {
-        if (!user) return;
-        
-        // 使用指定的路徑結構
-        const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'merch');
-        
-        const unsubscribe = onSnapshot(collectionRef, (snapshot) => {
-            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            // 按更新時間排序
-            setProducts(data.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
-        }, (error) => {
-            console.error("Firestore Error:", error);
-        });
-
-        return () => unsubscribe();
-    }, [user]);
-
-    // 圖片上傳處理
-    const handleImageUpload = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            if (file.size > 2 * 1024 * 1024) { 
-                showError("画像が大きすぎます (2MB以下推奨)");
-                return;
-            }
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setEditingProduct(prev => ({ ...prev, image: reader.result }));
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 1.5 * 1024 * 1024) { 
+                        setErrorMessage("圖片太大 (建議小於 1.5MB)");
+                        setTimeout(() => setErrorMessage(''), 3000);
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        setEditingProduct(prev => ({ ...prev, image: reader.result }));
+                    };
+                    reader.readAsDataURL(file);
+                }
             };
-            reader.readAsDataURL(file);
-        }
-    };
 
-    const showError = (msg) => {
-        setErrorMessage(msg);
-        setTimeout(() => setErrorMessage(''), 3000);
-    };
+            const handleSave = () => {
+                if (!editingProduct.name.trim()) {
+                    setErrorMessage("請輸入商品名稱");
+                    setTimeout(() => setErrorMessage(''), 3000);
+                    return;
+                }
+                
+                if (editingProduct.id) {
+                    setProducts(products.map(p => p.id === editingProduct.id ? editingProduct : p));
+                } else {
+                    const newProduct = { ...editingProduct, id: Date.now().toString() };
+                    setProducts([newProduct, ...products]);
+                }
+                setIsModalOpen(false);
+            };
 
-    const openAddModal = () => {
-        setEditingProduct({
-            name: '',
-            series: '',
-            category: 'acrylic',
-            memo: '',
-            image: '',
-            isNew: true
-        });
-        setIsModalOpen(true);
-    };
+            const handleDelete = (id) => {
+                setProducts(products.filter(p => p.id !== id));
+                setIsModalOpen(false);
+            };
 
-    // 儲存至 Firestore
-    const handleSave = async () => {
-        if (!editingProduct.name.trim() || !user) {
-            showError("商品名を入力してください (請輸入商品名稱)");
-            return;
-        }
-        
-        const docId = editingProduct.id || Date.now().toString();
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'merch', docId);
-        
-        const saveData = {
-            ...editingProduct,
-            id: docId,
-            lastUpdatedBy: user.uid,
-            updatedAt: Date.now(),
-            createdAt: editingProduct.createdAt || Date.now()
-        };
-        delete saveData.isNew;
+            const filteredProducts = products.filter(p => 
+                (p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                 p.series.toLowerCase().includes(searchQuery.toLowerCase())) &&
+                (activeTab === 'all' || p.category === activeTab)
+            );
 
-        try {
-            await setDoc(docRef, saveData);
-            setIsModalOpen(false);
-        } catch (e) {
-            console.error("Save Error", e);
-            showError("保存に失敗しました");
-        }
-    };
-
-    // 刪除資料
-    const handleDelete = async () => {
-        if (!editingProduct.id || !user) return;
-        try {
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'merch', editingProduct.id);
-            await deleteDoc(docRef);
-            setIsModalOpen(false);
-        } catch (e) {
-            console.error("Delete Error", e);
-        }
-    };
-
-    const filteredProducts = products.filter(p => 
-        (p.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-         p.series?.toLowerCase().includes(searchQuery.toLowerCase())) &&
-        (activeTab === 'all' || p.category === activeTab)
-    );
-
-    if (isLoading) return (
-        <div className="flex flex-col h-screen items-center justify-center bg-[#F8F9FA] space-y-4">
-            <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-indigo-600 font-bold tracking-widest text-[10px] uppercase">Connecting...</p>
-        </div>
-    );
-
-    return (
-        <div className="max-w-md mx-auto min-h-screen pb-10 bg-[#F8F9FA] relative font-sans text-slate-900 select-none">
-            <style>{`
-                .ios-blur { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-                .hide-scrollbar::-webkit-scrollbar { display: none; }
-                .modal-up { animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-                @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-            `}</style>
-
-            {/* Error Toast */}
-            {errorMessage && (
-                <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[100] bg-red-600 text-white px-6 py-3 rounded-full shadow-xl text-xs font-bold whitespace-nowrap">
-                    {errorMessage}
-                </div>
-            )}
-
-            {/* Header */}
-            <div className="p-6 pt-10">
-                <div className="flex justify-between items-center mb-6">
-                    <div>
-                        <h1 className="text-3xl font-black text-slate-800 tracking-tight">G-Manager</h1>
-                        <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">My Merch Collection</p>
-                    </div>
-                    <button 
-                        onClick={openAddModal}
-                        className="bg-indigo-600 text-white w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg active:scale-90 transition-all text-2xl"
-                    >+</button>
-                </div>
-
-                {/* Search Bar */}
-                <div className="bg-white rounded-2xl flex items-center px-5 py-4 mb-6 shadow-sm border border-slate-100 focus-within:ring-2 ring-indigo-100 transition-all">
-                    <span className="mr-3 opacity-30 text-lg">🔍</span>
-                    <input 
-                        className="bg-transparent border-none outline-none w-full text-sm font-medium placeholder-slate-300" 
-                        placeholder="検索... (搜尋商品或作品)" 
-                        value={searchQuery} 
-                        onChange={e => setSearchQuery(e.target.value)} 
-                    />
-                </div>
-
-                {/* Tabs */}
-                <div className="flex overflow-x-auto hide-scrollbar gap-2 mb-8">
-                    {Object.entries(categories).map(([key, label]) => (
-                        <button 
-                            key={key} 
-                            onClick={() => setActiveTab(key)} 
-                            className={`px-5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${activeTab === key ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-200'}`}
-                        >
-                            {label.jp} <span className="text-[9px] opacity-60 ml-0.5 font-normal">{label.zh}</span>
-                        </button>
-                    ))}
-                </div>
-
-                {/* Grid List */}
-                <div className="grid grid-cols-2 gap-4">
-                    {filteredProducts.map(p => (
-                        <div 
-                            key={p.id} 
-                            onClick={() => { setEditingProduct({...p}); setIsModalOpen(true); }} 
-                            className="bg-white rounded-[2rem] overflow-hidden shadow-sm border border-slate-100 active:scale-95 transition-all group"
-                        >
-                            <div className="h-40 bg-slate-50 flex items-center justify-center relative overflow-hidden">
-                                {p.image ? (
-                                    <img src={p.image} className="w-full h-full object-cover transition-transform group-hover:scale-110 duration-500" alt={p.name} />
-                                ) : (
-                                    <span className="text-slate-200 text-3xl">📦</span>
-                                )}
-                            </div>
-                            <div className="p-4 bg-white">
-                                <p className="text-[9px] text-indigo-500 font-black truncate uppercase tracking-wider mb-1">{p.series || 'No Series'}</p>
-                                <h3 className="font-bold text-sm text-slate-800 truncate leading-tight">{p.name || '未命名'}</h3>
-                            </div>
+            return (
+                <div className="max-w-md mx-auto min-h-screen pb-10 bg-[#F8F9FA] relative">
+                    {/* Error Toast */}
+                    {errorMessage && (
+                        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[100] bg-red-600 text-white px-6 py-3 rounded-full shadow-xl text-xs font-bold">
+                            {errorMessage}
                         </div>
-                    ))}
-                </div>
+                    )}
 
-                {filteredProducts.length === 0 && (
-                    <div className="text-center py-20 bg-white/50 rounded-3xl border border-dashed border-slate-200">
-                        <p className="text-slate-400 text-xs font-bold tracking-widest uppercase">No Archives Found</p>
-                    </div>
-                )}
-            </div>
-
-            {/* Editor Modal */}
-            {isModalOpen && editingProduct && (
-                <div className="fixed inset-0 z-50 flex items-end">
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setIsModalOpen(false)} />
-                    <div className="relative w-full max-w-md mx-auto bg-[#F2F2F7] rounded-t-[2.5rem] h-[92vh] flex flex-col modal-up overflow-hidden shadow-2xl">
-                        
-                        {/* Modal Header */}
-                        <div className="flex justify-between items-center px-8 py-6 bg-white border-b border-slate-100 z-10">
-                            <button onClick={() => setIsModalOpen(false)} className="text-slate-400 text-sm font-bold active:opacity-50">閉じる (關閉)</button>
-                            <h2 className="font-black text-slate-800 tracking-wider">DETAILS</h2>
-                            <button onClick={handleSave} className="text-indigo-600 font-black text-sm active:opacity-50">保存する (儲存)</button>
+                    {/* Header */}
+                    <div className="p-6 pt-10">
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h1 className="text-3xl font-black text-slate-800 tracking-tight">G-Manager</h1>
+                                <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Local Collection</p>
+                            </div>
+                            <button 
+                                onClick={() => {
+                                    setEditingProduct({ name: '', series: '', category: 'acrylic', memo: '', image: '' });
+                                    setIsModalOpen(true);
+                                }}
+                                className="bg-indigo-600 text-white w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg active:scale-90 transition-all text-2xl"
+                            >+</button>
                         </div>
 
-                        {/* Modal Content */}
-                        <div className="flex-1 overflow-y-auto p-8 space-y-6 hide-scrollbar">
-                            
-                            {/* Photo Selection */}
-                            <div className="flex flex-col items-center">
-                                <div 
-                                    className="w-56 h-56 bg-white rounded-[2.5rem] shadow-xl flex items-center justify-center overflow-hidden border-8 border-white cursor-pointer active:scale-95 transition-all group" 
-                                    onClick={() => fileInputRef.current.click()}
+                        {/* Search Bar */}
+                        <div className="bg-white rounded-2xl flex items-center px-5 py-4 mb-6 shadow-sm border border-slate-100">
+                            <span className="mr-3 opacity-30">🔍</span>
+                            <input 
+                                className="bg-transparent border-none outline-none w-full text-sm font-medium" 
+                                placeholder="搜尋商品或作品..." 
+                                value={searchQuery} 
+                                onChange={e => setSearchQuery(e.target.value)} 
+                            />
+                        </div>
+
+                        {/* Tabs */}
+                        <div className="flex overflow-x-auto hide-scrollbar gap-2 mb-8">
+                            {Object.entries(categories).map(([key, label]) => (
+                                <button 
+                                    key={key} 
+                                    onClick={() => setActiveTab(key)} 
+                                    className={`px-5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${activeTab === key ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-200'}`}
                                 >
-                                    {editingProduct.image ? (
-                                        <img src={editingProduct.image} className="w-full h-full object-cover" alt="preview" />
-                                    ) : (
-                                        <div className="text-center group-hover:scale-110 transition-transform">
-                                            <span className="text-5xl block mb-3">🖼️</span>
-                                            <span className="text-[10px] text-slate-300 font-bold uppercase tracking-widest">Add Photo</span>
-                                        </div>
-                                    )}
+                                    {label.jp} <span className="text-[9px] opacity-60 ml-0.5 font-normal">{label.zh}</span>
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Grid List */}
+                        <div className="grid grid-cols-2 gap-4">
+                            {filteredProducts.map(p => (
+                                <div 
+                                    key={p.id} 
+                                    onClick={() => { setEditingProduct({...p}); setIsModalOpen(true); }} 
+                                    className="bg-white rounded-[2rem] overflow-hidden shadow-sm border border-slate-100 active:scale-95 transition-all group"
+                                >
+                                    <div className="h-40 bg-slate-50 flex items-center justify-center overflow-hidden">
+                                        {p.image ? (
+                                            <img src={p.image} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <span className="text-slate-200 text-3xl">📦</span>
+                                        )}
+                                    </div>
+                                    <div className="p-4">
+                                        <p className="text-[9px] text-indigo-500 font-black truncate uppercase mb-1">{p.series || 'No Series'}</p>
+                                        <h3 className="font-bold text-sm text-slate-800 truncate">{p.name || '未命名'}</h3>
+                                    </div>
                                 </div>
-                                <input type="file" ref={fileInputRef} className="hidden" onChange={handleImageUpload} accept="image/*" />
+                            ))}
+                        </div>
+
+                        {filteredProducts.length === 0 && (
+                            <div className="text-center py-20 bg-white/50 rounded-3xl border border-dashed border-slate-200 mt-4">
+                                <p className="text-slate-400 text-xs font-bold">無搜尋結果</p>
                             </div>
+                        )}
+                    </div>
 
-                            {/* Form Fields */}
-                            <div className="space-y-4">
-                                <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm focus-within:ring-2 ring-indigo-50 transition-all">
-                                    <label className="text-[9px] text-slate-400 block mb-2 font-black uppercase tracking-widest">商品名 / Product Name</label>
-                                    <input 
-                                        className="w-full bg-transparent outline-none font-bold text-slate-800 text-lg placeholder:text-slate-200" 
-                                        value={editingProduct.name} 
-                                        placeholder="例：雪ミク 2024 アクスタ"
-                                        onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} 
-                                    />
+                    {/* Editor Modal */}
+                    {isModalOpen && editingProduct && (
+                        <div className="fixed inset-0 z-50 flex items-end">
+                            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
+                            <div className="relative w-full max-w-md mx-auto bg-[#F2F2F7] rounded-t-[2.5rem] h-[90vh] flex flex-col modal-up overflow-hidden">
+                                <div className="flex justify-between items-center px-8 py-6 bg-white border-b border-slate-100">
+                                    <button onClick={() => setIsModalOpen(false)} className="text-slate-400 text-sm font-bold">關閉</button>
+                                    <h2 className="font-black text-slate-800 tracking-wider">DETAILS</h2>
+                                    <button onClick={handleSave} className="text-indigo-600 font-black text-sm">儲存</button>
                                 </div>
 
-                                <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
-                                    <label className="text-[9px] text-slate-400 block mb-2 font-black uppercase tracking-widest">作品名 / Series</label>
-                                    <input 
-                                        className="w-full bg-transparent outline-none font-bold text-slate-700" 
-                                        value={editingProduct.series} 
-                                        placeholder="作品系列..."
-                                        onChange={e => setEditingProduct({...editingProduct, series: e.target.value})} 
-                                    />
-                                </div>
+                                <div className="flex-1 overflow-y-auto p-8 space-y-6">
+                                    <div className="flex flex-col items-center">
+                                        <div 
+                                            className="w-48 h-48 bg-white rounded-[2rem] shadow-xl flex items-center justify-center overflow-hidden border-4 border-white cursor-pointer" 
+                                            onClick={() => fileInputRef.current.click()}
+                                        >
+                                            {editingProduct.image ? (
+                                                <img src={editingProduct.image} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="text-center">
+                                                    <span className="text-4xl block mb-2">🖼️</span>
+                                                    <span className="text-[10px] text-slate-300 font-bold uppercase">Add Photo</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <input type="file" ref={fileInputRef} className="hidden" onChange={handleImageUpload} accept="image/*" />
+                                    </div>
 
-                                <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm relative">
-                                    <label className="text-[9px] text-slate-400 block mb-2 font-black uppercase tracking-widest">カテゴリ / Category</label>
-                                    <select 
-                                        className="w-full bg-transparent outline-none font-black text-indigo-600 appearance-none cursor-pointer" 
-                                        value={editingProduct.category} 
-                                        onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
-                                    >
-                                        {Object.entries(categories).filter(([k]) => k !== 'all').map(([k, v]) => (
-                                            <option key={k} value={k}>{v.jp} ({v.zh})</option>
-                                        ))}
-                                    </select>
-                                    <span className="absolute right-6 bottom-6 text-[10px] pointer-events-none opacity-30">▼</span>
-                                </div>
+                                    <div className="space-y-4">
+                                        <div className="bg-white p-4 rounded-2xl border border-slate-100">
+                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">商品名稱</label>
+                                            <input 
+                                                className="w-full bg-transparent outline-none font-bold text-slate-800" 
+                                                value={editingProduct.name} 
+                                                onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} 
+                                            />
+                                        </div>
+                                        <div className="bg-white p-4 rounded-2xl border border-slate-100">
+                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">作品系列</label>
+                                            <input 
+                                                className="w-full bg-transparent outline-none font-bold text-slate-700" 
+                                                value={editingProduct.series} 
+                                                onChange={e => setEditingProduct({...editingProduct, series: e.target.value})} 
+                                            />
+                                        </div>
+                                        <div className="bg-white p-4 rounded-2xl border border-slate-100">
+                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">分類</label>
+                                            <select 
+                                                className="w-full bg-transparent outline-none font-black text-indigo-600 appearance-none" 
+                                                value={editingProduct.category} 
+                                                onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
+                                            >
+                                                {Object.entries(categories).filter(([k]) => k !== 'all').map(([k, v]) => (
+                                                    <option key={k} value={k}>{v.zh}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="bg-white p-4 rounded-2xl border border-slate-100">
+                                            <label className="text-[9px] text-slate-400 block mb-1 font-black uppercase">備註</label>
+                                            <textarea 
+                                                className="w-full bg-transparent outline-none text-sm h-24 resize-none" 
+                                                value={editingProduct.memo} 
+                                                onChange={e => setEditingProduct({...editingProduct, memo: e.target.value})} 
+                                            />
+                                        </div>
 
-                                <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
-                                    <label className="text-[9px] text-slate-400 block mb-2 font-black uppercase tracking-widest">詳情與備註 / Note</label>
-                                    <textarea 
-                                        className="w-full bg-transparent outline-none text-sm h-32 resize-none text-slate-600 leading-relaxed font-medium" 
-                                        value={editingProduct.memo} 
-                                        placeholder="材質、尺寸、購入場所或保存狀態..."
-                                        onChange={e => setEditingProduct({...editingProduct, memo: e.target.value})} 
-                                    />
+                                        {editingProduct.id && (
+                                            <button 
+                                                onClick={() => { if(confirm("確定要刪除嗎？")) handleDelete(editingProduct.id); }} 
+                                                className="w-full py-4 text-red-500 font-black text-xs uppercase tracking-widest"
+                                            >
+                                                DELETE ITEM
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
-
-                                {!editingProduct.isNew && (
-                                    <button 
-                                        onClick={() => {
-                                            if(window.confirm("このアイテムを削除しますか？ (確定要刪除嗎？)")) {
-                                                handleDelete();
-                                            }
-                                        }} 
-                                        className="w-full py-5 text-red-500 font-black text-xs uppercase tracking-widest bg-red-50/50 hover:bg-red-50 rounded-3xl transition-colors mt-4 mb-8"
-                                    >
-                                        DELETE ITEM (刪除項目)
-                                    </button>
-                                )}
-                                <div className="h-10" />
                             </div>
                         </div>
-                    </div>
+                    )}
                 </div>
-            )}
-        </div>
-    );
-}
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
