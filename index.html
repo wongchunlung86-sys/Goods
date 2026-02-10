@@ -10,6 +10,27 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- 🔹 在 React / Babel 之後 -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } 
+    from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+  import { getStorage, ref, uploadBytes, getDownloadURL } 
+    from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+
+  const app = initializeApp({
+  apiKey: "AIzaSyBmnMiQ_uXKbjiLaPqiAppcxUfQ8Bdf3rc",
+  authDomain: "company-internal-goods.firebaseapp.com",
+  projectId: "company-internal-goods",
+  storageBucket: "company-internal-goods.appspot.com",
+  appId: "1:439442142491:web:2996e6e38525353323cfbe"
+});
+
+window.firebaseDb = getFirestore(app);
+window.firebaseStorage = getStorage(app);
+</script>
+
     
     <style>
         body { 
@@ -77,36 +98,58 @@
             }, [products]);
 
             const handleImageUpload = (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    if (file.size > 1.5 * 1024 * 1024) { 
-                        setErrorMessage("画像が大きすぎます (1.5MB以下推奨)");
-                        setTimeout(() => setErrorMessage(''), 3000);
-                        return;
-                    }
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        setEditingProduct(prev => ({ ...prev, image: reader.result }));
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
+    const file = e.target.files[0];
+    if (!file) return;
 
-            const handleSave = () => {
-                if (!editingProduct.name.trim()) {
-                    setErrorMessage("商品名を入力してください");
-                    setTimeout(() => setErrorMessage(''), 3000);
-                    return;
-                }
-                
-                if (editingProduct.id) {
-                    setProducts(products.map(p => p.id === editingProduct.id ? editingProduct : p));
-                } else {
-                    const newProduct = { ...editingProduct, id: Date.now().toString() };
-                    setProducts([newProduct, ...products]);
-                }
-                setIsModalOpen(false);
-            };
+    if (file.size > 1.5 * 1024 * 1024) { 
+        setErrorMessage("画像が大きすぎます (1.5MB以下推奨)");
+        setTimeout(() => setErrorMessage(''), 3000);
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        setEditingProduct(prev => ({
+            ...prev,
+            image: reader.result
+        }));
+    };
+    reader.readAsDataURL(file);
+};
+
+
+            const handleSave = async () => {
+    if (!editingProduct.name.trim()) {
+        setErrorMessage("商品名を入力してください");
+        setTimeout(() => setErrorMessage(''), 3000);
+        return;
+    }
+
+    if (!editingProduct.id) {
+        await window.addDoc(
+    window.collection(window.firebaseDb, "products"),
+    {
+        name: editingProduct.name,
+        series: editingProduct.series,
+        category: editingProduct.category,
+        memo: editingProduct.memo,
+        image: editingProduct.image || "",
+        createdAt: window.serverTimestamp()
+    }
+);
+
+    }
+
+    // 本地仍然照原本方式
+    if (editingProduct.id) {
+        setProducts(products.map(p => p.id === editingProduct.id ? editingProduct : p));
+    } else {
+        const newProduct = { ...editingProduct, id: Date.now().toString() };
+        setProducts([newProduct, ...products]);
+    }
+
+    setIsModalOpen(false);
+};
 
             const handleDelete = (id) => {
                 setProducts(products.filter(p => p.id !== id));
